@@ -1,79 +1,81 @@
 import '@src/Popup.css';
-import { useStorage, withErrorBoundary, withSuspense } from '@extension/shared';
-import { exampleThemeStorage } from '@extension/storage';
-import type { ComponentPropsWithoutRef } from 'react';
-
-const notificationOptions = {
-  type: 'basic',
-  iconUrl: chrome.runtime.getURL('icon-34.png'),
-  title: 'Injecting content script error',
-  message: 'You cannot inject script here!',
-} as const;
+import { withErrorBoundary, withSuspense } from '@extension/shared';
+import { useState, useCallback } from 'react';
+import { ActionButton } from './components/ActionButton';
+import { useChromeActions } from './hooks/useChromeActions';
+import { MESSAGES } from './constants/messages';
 
 const Popup = () => {
-  const theme = useStorage(exampleThemeStorage);
-  const isLight = theme === 'light';
-  const logo = isLight ? 'popup/logo_vertical.svg' : 'popup/logo_vertical_dark.svg';
-  const goGithubSite = () =>
-    chrome.tabs.create({ url: 'https://github.com/Jonghakseo/chrome-extension-boilerplate-react-vite' });
+  const [searchResults, setSearchResults] = useState<string[]>([]);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const { injectContentScript, findOccurrencesWithDates, clickViewAllCheckbox } = useChromeActions();
 
-  const injectContentScript = async () => {
-    const [tab] = await chrome.tabs.query({ currentWindow: true, active: true });
-
-    if (tab.url!.startsWith('about:') || tab.url!.startsWith('chrome:')) {
-      chrome.notifications.create('inject-error', notificationOptions);
+  const handleStart = useCallback(async () => {
+    setIsProcessing(true);
+    try {
+      await injectContentScript();
+      await clickViewAllCheckbox();
+      const results = await findOccurrencesWithDates();
+      if (results) {
+        setSearchResults(MESSAGES.SEARCH_RESULTS(results).split('\n'));
+      }
+    } finally {
+      setIsProcessing(false);
     }
+  }, [injectContentScript, clickViewAllCheckbox, findOccurrencesWithDates]);
 
-    await chrome.scripting
-      .executeScript({
-        target: { tabId: tab.id! },
-        files: ['/content-runtime/index.iife.js'],
-      })
-      .catch(err => {
-        // Handling errors related to other paths
-        if (err.message.includes('Cannot access a chrome:// URL')) {
-          chrome.notifications.create('inject-error', notificationOptions);
-        }
-      });
-  };
+  const foundResults = searchResults.filter(result => !result.includes('Not found'));
+  const notFoundResults = searchResults.filter(result => result.includes('Not found'));
 
   return (
-    <div className={`App ${isLight ? 'bg-slate-50' : 'bg-gray-800'}`}>
-      <header className={`App-header ${isLight ? 'text-gray-900' : 'text-gray-100'}`}>
-        <button onClick={goGithubSite}>
-          <img src={chrome.runtime.getURL(logo)} className="App-logo" alt="logo" />
-        </button>
-        <p>
-          Edit <code>pages/popup/src/Popup.tsx</code>
-        </p>
-        <button
-          className={
-            'font-bold mt-4 py-1 px-4 rounded shadow hover:scale-105 ' +
-            (isLight ? 'bg-blue-200 text-black' : 'bg-gray-700 text-white')
-          }
-          onClick={injectContentScript}>
-          Click to inject Content Script
-        </button>
-        <ToggleButton>Toggle theme</ToggleButton>
-      </header>
+    <div className="min-w-[450px] bg-slate-50 p-4">
+      <header className="mb-4 text-xl font-semibold text-gray-900">PCC Helper</header>
+
+      <main className="space-y-4">
+        <ActionButton
+          onClick={handleStart}
+          disabled={isProcessing}
+          className="w-full bg-green-500 py-3 text-lg font-semibold text-white hover:bg-green-600">
+          {isProcessing ? 'Processing...' : 'Start PCC Helper'}
+        </ActionButton>
+
+        {searchResults.length > 0 && (
+          <div className="space-y-4">
+            {foundResults.length > 0 && (
+              <div className="rounded-md bg-green-50 p-3 text-sm">
+                <div className="mb-2 font-semibold text-green-800 text-xl">Found Items:</div>
+                {foundResults.map((result, index) => (
+                  <div
+                    key={index}
+                    className={`${index > 0 ? 'mt-2 border-t border-green-100 pt-2' : ''} 
+                      text-green-700`}>
+                    {result}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {notFoundResults.length > 0 && (
+              <div className="rounded-md bg-red-50 p-3 text-sm">
+                <div className="mb-2 font-semibold text-xl text-red-800">Not Found Items:</div>
+                {notFoundResults.map((result, index) => (
+                  <div
+                    key={index}
+                    className={`${index > 0 ? 'mt-2 border-t border-red-100 pt-2' : ''} 
+                      text-red-600`}>
+                    ⚠️ {result}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </main>
     </div>
   );
 };
 
-const ToggleButton = (props: ComponentPropsWithoutRef<'button'>) => {
-  const theme = useStorage(exampleThemeStorage);
-  return (
-    <button
-      className={
-        props.className +
-        ' ' +
-        'font-bold mt-4 py-1 px-4 rounded shadow hover:scale-105 ' +
-        (theme === 'light' ? 'bg-white text-black shadow-black' : 'bg-black text-white')
-      }
-      onClick={exampleThemeStorage.toggle}>
-      {props.children}
-    </button>
-  );
-};
-
-export default withErrorBoundary(withSuspense(Popup, <div> Loading ... </div>), <div> Error Occur </div>);
+export default withErrorBoundary(
+  withSuspense(Popup, <div className="p-4">Loading...</div>),
+  <div className="p-4 text-red-500">Error Occurred</div>,
+);

@@ -1,7 +1,7 @@
 {
-  "name": "chrome-extension-boilerplate-react-vite",
+  "name": "pcc-helper",
   "version": "0.3.3",
-  "description": "chrome extension boilerplate",
+  "description": "PCC Helper",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -32,7 +32,8 @@
   "dependencies": {
     "eslint-plugin-tailwindcss": "^3.17.4",
     "react": "18.3.1",
-    "react-dom": "18.3.1"
+    "react-dom": "18.3.1",
+    "tailwind-merge": "^2.4.0"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.270",
