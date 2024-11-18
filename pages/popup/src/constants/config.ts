@@ -3,4 +3,10 @@ export const NOTIFICATION_CONFIG = {
   iconUrl: chrome.runtime.getURL('icon-32.png'),
 } as const;
 
-export const SEARCH_TERMS = ['Weekly', 'Nutrition Note', 'Sud', 'Progression Note'] as const;
+export const SEARCH_TERMS = [
+  'Care Conference',
+  'Quarterly social service evaluation',
+  'PHQ-9',
+  'SUD evaluation',
+  'Trauma informed care',
+] as const;

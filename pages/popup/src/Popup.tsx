@@ -1,17 +1,32 @@
 import '@src/Popup.css';
 import { withErrorBoundary, withSuspense } from '@extension/shared';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { ActionButton } from './components/ActionButton';
+import { ErrorMessage } from './components/ErrorMessage';
 import { useChromeActions } from './hooks/useChromeActions';
 import { MESSAGES } from './constants/messages';
 
 const Popup = () => {
   const [searchResults, setSearchResults] = useState<string[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
-  const { injectContentScript, findOccurrencesWithDates, clickViewAllCheckbox } = useChromeActions();
+  const [errorMessage, setErrorMessage] = useState<{ title: string; message: string } | null>(null);
+
+  // Clear error message on popup reload
+  useEffect(() => {
+    setErrorMessage(null);
+  }, []);
+
+  const handleShowMessage = useCallback((title: string, message: string, type: NotificationType) => {
+    if (type === 'error') {
+      setErrorMessage({ title, message });
+    }
+  }, []);
+
+  const { injectContentScript, findOccurrencesWithDates, clickViewAllCheckbox } = useChromeActions(handleShowMessage);
 
   const handleStart = useCallback(async () => {
     setIsProcessing(true);
+    setErrorMessage(null);
     try {
       await injectContentScript();
       await clickViewAllCheckbox();
@@ -43,7 +58,7 @@ const Popup = () => {
           <div className="space-y-4">
             {foundResults.length > 0 && (
               <div className="rounded-md bg-green-50 p-3 text-sm">
-                <div className="mb-2 font-semibold text-green-800 text-xl">Found Items:</div>
+                <div className="mb-2 text-xl font-semibold text-green-800">Found Items:</div>
                 {foundResults.map((result, index) => (
                   <div
                     key={index}
@@ -57,19 +72,21 @@ const Popup = () => {
 
             {notFoundResults.length > 0 && (
               <div className="rounded-md bg-red-50 p-3 text-sm">
-                <div className="mb-2 font-semibold text-xl text-red-800">Not Found Items:</div>
+                <div className="mb-2 text-xl font-semibold text-red-800">Not Found Items:</div>
                 {notFoundResults.map((result, index) => (
                   <div
                     key={index}
                     className={`${index > 0 ? 'mt-2 border-t border-red-100 pt-2' : ''} 
                       text-red-600`}>
-                    ⚠️ {result}
+                    {result}
                   </div>
                 ))}
               </div>
             )}
           </div>
         )}
+
+        {errorMessage && <ErrorMessage title={errorMessage.title} message={errorMessage.message} />}
       </main>
     </div>
   );

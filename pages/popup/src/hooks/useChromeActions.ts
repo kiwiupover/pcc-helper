@@ -3,20 +3,21 @@ import type { NotificationType, SearchResult } from '../types';
 import { NOTIFICATION_CONFIG, SEARCH_TERMS } from '../constants/config';
 import { MESSAGES } from '../constants/messages';
 
-export const useChromeActions = () => {
+export const useChromeActions = (onShowMessage?: (title: string, message: string, type: NotificationType) => void) => {
   const getCurrentTab = useCallback(async () => {
     const [tab] = await chrome.tabs.query({ currentWindow: true, active: true });
     if (!tab?.id || !tab.url) return null;
     return tab;
   }, []);
 
-  const showNotification = useCallback((title: string, message: string, type: NotificationType = 'info') => {
-    chrome.notifications.create(type, {
-      ...NOTIFICATION_CONFIG,
-      title,
-      message,
-    });
-  }, []);
+  const showNotification = useCallback(
+    (title: string, message: string, type: NotificationType = 'info') => {
+      if (onShowMessage) {
+        onShowMessage(title, message, type);
+      }
+    },
+    [onShowMessage],
+  );
 
   const injectContentScript = useCallback(async () => {
     try {
@@ -28,10 +29,11 @@ export const useChromeActions = () => {
         return;
       }
 
-      await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        files: ['/content-runtime/index.iife.js'],
-      });
+      const isValid = await isValidPage();
+      if (!isValid) {
+        showNotification(MESSAGES.INVALID_PAGE, MESSAGES.WRONG_PAGE_INSTRUCTION, 'error');
+        return;
+      }
     } catch (err) {
       if (err instanceof Error && err.message.includes('Cannot access a chrome:// URL')) {
         showNotification(MESSAGES.INJECT_ERROR_TITLE, MESSAGES.INJECT_ERROR, 'error');
@@ -40,8 +42,22 @@ export const useChromeActions = () => {
     }
   }, [getCurrentTab, showNotification]);
 
+  const isValidPage = useCallback(async () => {
+    const tab = await getCurrentTab();
+    if (!tab?.url) return false;
+
+    const isValid = tab.url.includes('client/cp_assessment.jsp');
+    console.log({ isValid });
+    return isValid;
+  }, [getCurrentTab]);
+
   const findOccurrencesWithDates = useCallback(async (): Promise<SearchResult[] | null> => {
     try {
+      if (!(await isValidPage())) {
+        showNotification('Invalid Page', MESSAGES.INVALID_PAGE, 'error');
+        return null;
+      }
+
       const tab = await getCurrentTab();
       if (!tab?.id) return null;
 
@@ -69,14 +85,20 @@ export const useChromeActions = () => {
       console.error('Error finding occurrences with dates:', err);
       return null;
     }
-  }, [getCurrentTab]);
+  }, [getCurrentTab, isValidPage, showNotification]);
 
   const clickViewAllCheckbox = useCallback(async () => {
     try {
+      if (!(await isValidPage())) {
+        showNotification('Invalid Page', MESSAGES.INVALID_PAGE, 'error');
+        return 'invalid_page';
+      }
+
       const tab = await getCurrentTab();
       if (!tab?.id) return;
 
-      const results = await chrome.scripting.executeScript({
+      // First check if checkbox exists and needs to be clicked
+      const checkResults = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         func: () => {
           const viewAllCheckbox = document.querySelector(
@@ -85,8 +107,7 @@ export const useChromeActions = () => {
 
           if (viewAllCheckbox) {
             if (!viewAllCheckbox.checked) {
-              viewAllCheckbox.click();
-              return 'clicked';
+              return 'needs_click';
             }
             return 'already_checked';
           }
@@ -94,26 +115,50 @@ export const useChromeActions = () => {
         },
       });
 
-      const status = results[0]?.result;
+      const initialStatus = checkResults[0]?.result;
 
-      switch (status) {
-        case 'clicked':
-          showNotification('Success', MESSAGES.CHECKBOX_CLICKED, 'success');
-          break;
-        case 'not_found':
-          showNotification('Not Found', MESSAGES.CHECKBOX_NOT_FOUND, 'error');
-          break;
-        case 'already_checked':
-          showNotification('Already Checked', MESSAGES.CHECKBOX_ALREADY_CHECKED, 'info');
-          break;
+      if (initialStatus === 'already_checked') {
+        showNotification('Already Checked', MESSAGES.CHECKBOX_ALREADY_CHECKED, 'info');
+        return 'already_checked';
       }
 
-      return status;
+      if (initialStatus === 'not_found') {
+        showNotification('Not Found', MESSAGES.CHECKBOX_NOT_FOUND, 'error');
+        return 'not_found';
+      }
+
+      // If we need to click, set up a listener for the page load
+      const pageLoadPromise = new Promise<void>(resolve => {
+        const onUpdated = (tabId: number, changeInfo: chrome.tabs.TabChangeInfo) => {
+          if (tabId === tab.id && changeInfo.status === 'complete') {
+            chrome.tabs.onUpdated.removeListener(onUpdated);
+            resolve();
+          }
+        };
+        chrome.tabs.onUpdated.addListener(onUpdated);
+      });
+
+      // Click the checkbox
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => {
+          const viewAllCheckbox = document.querySelector(
+            'input[type="checkbox"][name="ESOLviewall"][value="Y"]',
+          ) as HTMLInputElement;
+          viewAllCheckbox.click();
+        },
+      });
+
+      // Wait for the page to finish loading
+      await pageLoadPromise;
+
+      showNotification('Success', MESSAGES.CHECKBOX_CLICKED, 'success');
+      return 'clicked';
     } catch (err) {
       console.error('Error clicking view all checkbox:', err);
       return 'error';
     }
-  }, [getCurrentTab, showNotification]);
+  }, [getCurrentTab, isValidPage, showNotification]);
 
   return {
     injectContentScript,
