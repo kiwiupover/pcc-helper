@@ -4,10 +4,9 @@ import { useState, useCallback, useEffect } from 'react';
 import { ActionButton } from './components/ActionButton';
 import { ErrorMessage } from './components/ErrorMessage';
 import { useChromeActions } from './hooks/useChromeActions';
-import { MESSAGES } from './constants/messages';
 
 const Popup = () => {
-  const [searchResults, setSearchResults] = useState<string[]>([]);
+  const [searchResults, setSearchResults] = useState<(string | { term: string; date: string; isOld: boolean })[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<{ title: string; message: string } | null>(null);
 
@@ -32,15 +31,23 @@ const Popup = () => {
       await clickViewAllCheckbox();
       const results = await findOccurrencesWithDates();
       if (results) {
-        setSearchResults(MESSAGES.SEARCH_RESULTS(results).split('\n'));
+        const formattedResults = results.map(result => {
+          if (!result.date) return `${result.term}: Not found`;
+          return {
+            term: result.term,
+            date: result.date,
+            isOld: result.isOld,
+          };
+        });
+        setSearchResults(formattedResults);
       }
     } finally {
       setIsProcessing(false);
     }
   }, [injectContentScript, clickViewAllCheckbox, findOccurrencesWithDates]);
 
-  const foundResults = searchResults.filter(result => !result.includes('Not found'));
-  const notFoundResults = searchResults.filter(result => result.includes('Not found'));
+  const foundResults = searchResults.filter(result => typeof result === 'object' && 'term' in result);
+  const notFoundResults = searchResults.filter(result => typeof result === 'string');
 
   return (
     <div className="min-w-[450px] bg-slate-50 p-4">
@@ -59,28 +66,42 @@ const Popup = () => {
             {foundResults.length > 0 && (
               <div className="rounded-md bg-green-50 p-3 text-sm">
                 <div className="mb-2 text-xl font-semibold text-green-800">Found Items:</div>
-                {foundResults.map((result, index) => (
-                  <div
-                    key={index}
-                    className={`${index > 0 ? 'mt-2 border-t border-green-100 pt-2' : ''} 
-                      text-green-700`}>
-                    {result}
-                  </div>
-                ))}
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-green-100">
+                      <th className="pb-2 text-left font-semibold text-green-800">Item</th>
+                      <th className="pb-2 text-left font-semibold text-green-800">Date</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {foundResults.map((result, index) => {
+                      const { term, date, isOld } = result as { term: string; date: string; isOld: boolean };
+                      return (
+                        <tr key={index} className={`${index > 0 ? 'border-t border-green-100' : ''}`}>
+                          <td className="py-2 text-green-700">{term}</td>
+                          <td className="py-2">
+                            <span className={isOld ? 'text-red-600' : 'text-green-700'}>{date}</span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             )}
 
             {notFoundResults.length > 0 && (
               <div className="rounded-md bg-red-50 p-3 text-sm">
                 <div className="mb-2 text-xl font-semibold text-red-800">Not Found Items:</div>
-                {notFoundResults.map((result, index) => (
-                  <div
-                    key={index}
-                    className={`${index > 0 ? 'mt-2 border-t border-red-100 pt-2' : ''} 
-                      text-red-600`}>
-                    {result}
-                  </div>
-                ))}
+                <table className="w-full">
+                  <tbody>
+                    {notFoundResults.map((result, index) => (
+                      <tr key={index} className={`${index > 0 ? 'border-t border-red-100' : ''}`}>
+                        <td className="py-2 text-red-600">{result}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>

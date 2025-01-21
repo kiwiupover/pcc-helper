@@ -1,9 +1,10 @@
 export type NotificationType = 'info' | 'error' | 'success';
 
-export interface SearchResult {
+export type SearchResult = {
   term: string;
   date: string | null;
-}
+  isOld: boolean;
+};
 
 export interface ButtonProps {
   onClick: () => void;

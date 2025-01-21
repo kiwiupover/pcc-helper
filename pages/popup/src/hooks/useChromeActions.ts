@@ -1,7 +1,16 @@
 import { useCallback } from 'react';
 import type { NotificationType, SearchResult } from '../types';
-import { NOTIFICATION_CONFIG, SEARCH_TERMS } from '../constants/config';
-import { MESSAGES } from '../constants/messages';
+import { ALL_SEARCH_TERMS, TIME_RANGES } from '../constants/config';
+
+const ERROR_MESSAGES = {
+  INJECT_ERROR: 'You cannot inject script here!',
+  INJECT_ERROR_TITLE: 'Injecting content script error',
+  CHECKBOX_CLICKED: 'View All checkbox clicked successfully',
+  CHECKBOX_NOT_FOUND: 'View All checkbox not found on page',
+  CHECKBOX_ALREADY_CHECKED: 'View All checkbox is already checked',
+  INVALID_PAGE: 'This feature only works on the Client Evaluations page',
+  WRONG_PAGE_INSTRUCTION: 'Please navigate to the Client Evaluations page and try again',
+} as const;
 
 export const useChromeActions = (onShowMessage?: (title: string, message: string, type: NotificationType) => void) => {
   const getCurrentTab = useCallback(async () => {
@@ -25,18 +34,18 @@ export const useChromeActions = (onShowMessage?: (title: string, message: string
       if (!tab?.url) return;
 
       if (tab.url.startsWith('about:') || tab.url.startsWith('chrome:')) {
-        showNotification(MESSAGES.INJECT_ERROR_TITLE, MESSAGES.INJECT_ERROR, 'error');
+        showNotification(ERROR_MESSAGES.INJECT_ERROR_TITLE, ERROR_MESSAGES.INJECT_ERROR, 'error');
         return;
       }
 
       const isValid = await isValidPage();
       if (!isValid) {
-        showNotification(MESSAGES.INVALID_PAGE, MESSAGES.WRONG_PAGE_INSTRUCTION, 'error');
+        showNotification(ERROR_MESSAGES.INVALID_PAGE, ERROR_MESSAGES.WRONG_PAGE_INSTRUCTION, 'error');
         return;
       }
     } catch (err) {
       if (err instanceof Error && err.message.includes('Cannot access a chrome:// URL')) {
-        showNotification(MESSAGES.INJECT_ERROR_TITLE, MESSAGES.INJECT_ERROR, 'error');
+        showNotification(ERROR_MESSAGES.INJECT_ERROR_TITLE, ERROR_MESSAGES.INJECT_ERROR, 'error');
       }
       console.error('Error injecting content script:', err);
     }
@@ -54,7 +63,7 @@ export const useChromeActions = (onShowMessage?: (title: string, message: string
   const findOccurrencesWithDates = useCallback(async (): Promise<SearchResult[] | null> => {
     try {
       if (!(await isValidPage())) {
-        showNotification('Invalid Page', MESSAGES.INVALID_PAGE, 'error');
+        showNotification(ERROR_MESSAGES.INVALID_PAGE, ERROR_MESSAGES.WRONG_PAGE_INSTRUCTION, 'error');
         return null;
       }
 
@@ -63,21 +72,42 @@ export const useChromeActions = (onShowMessage?: (title: string, message: string
 
       const results = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
-        func: (searchTerms: string[]) => {
+        func: searchTermsConfig => {
           const rows = Array.from(document.querySelectorAll('#msg table tr'));
-          return searchTerms.map(term => {
+          const currentDate = new Date();
+
+          return searchTermsConfig.map(config => {
             for (const row of rows) {
               const cells = Array.from(row.querySelectorAll('td'));
               const dateCell = cells.find(cell => /\d{1,2}\/\d{1,2}\/\d{4}/.test(cell.innerText));
-              const matchingCell = cells.find(cell => cell.innerText.toLowerCase().includes(term.toLowerCase()));
+              const matchingCell = cells.find(cell => cell.innerText.toLowerCase().includes(config.term.toLowerCase()));
+
               if (dateCell && matchingCell) {
-                return { term, date: dateCell.innerText };
+                const dateText = dateCell.innerText;
+                const [month, day, year] = dateText.split('/').map(Number);
+                const date = new Date(year, month - 1, day);
+
+                // Set both dates to start of day for accurate comparison
+                date.setHours(0, 0, 0, 0);
+                const compareDate = new Date(currentDate);
+                compareDate.setHours(0, 0, 0, 0);
+
+                let isOld = false;
+                if (config.timeRange === 'THREE_MONTHS') {
+                  const threeMonthsAgo = new Date(compareDate.getTime() - TIME_RANGES.THREE_MONTHS);
+                  isOld = date.getTime() < threeMonthsAgo.getTime();
+                } else if (config.timeRange === 'ONE_YEAR') {
+                  const oneYearAgo = new Date(compareDate.getTime() - TIME_RANGES.ONE_YEAR);
+                  isOld = date.getTime() < oneYearAgo.getTime();
+                }
+
+                return { term: config.term, date: dateText, isOld };
               }
             }
-            return { term, date: null };
+            return { term: config.term, date: null, isOld: false };
           });
         },
-        args: [SEARCH_TERMS],
+        args: [ALL_SEARCH_TERMS],
       });
 
       return results[0]?.result || null;
@@ -90,7 +120,7 @@ export const useChromeActions = (onShowMessage?: (title: string, message: string
   const clickViewAllCheckbox = useCallback(async () => {
     try {
       if (!(await isValidPage())) {
-        showNotification('Invalid Page', MESSAGES.INVALID_PAGE, 'error');
+        showNotification(ERROR_MESSAGES.INVALID_PAGE, ERROR_MESSAGES.WRONG_PAGE_INSTRUCTION, 'error');
         return 'invalid_page';
       }
 
@@ -118,12 +148,12 @@ export const useChromeActions = (onShowMessage?: (title: string, message: string
       const initialStatus = checkResults[0]?.result;
 
       if (initialStatus === 'already_checked') {
-        showNotification('Already Checked', MESSAGES.CHECKBOX_ALREADY_CHECKED, 'info');
+        showNotification('Already Checked', ERROR_MESSAGES.CHECKBOX_ALREADY_CHECKED, 'info');
         return 'already_checked';
       }
 
       if (initialStatus === 'not_found') {
-        showNotification('Not Found', MESSAGES.CHECKBOX_NOT_FOUND, 'error');
+        showNotification('Not Found', ERROR_MESSAGES.CHECKBOX_NOT_FOUND, 'error');
         return 'not_found';
       }
 
@@ -152,7 +182,7 @@ export const useChromeActions = (onShowMessage?: (title: string, message: string
       // Wait for the page to finish loading
       await pageLoadPromise;
 
-      showNotification('Success', MESSAGES.CHECKBOX_CLICKED, 'success');
+      showNotification('Success', ERROR_MESSAGES.CHECKBOX_CLICKED, 'success');
       return 'clicked';
     } catch (err) {
       console.error('Error clicking view all checkbox:', err);
