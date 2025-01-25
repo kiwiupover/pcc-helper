@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
-import type { NotificationType, SearchResult } from '../types';
-import { NOTIFICATION_CONFIG, SEARCH_TERMS } from '../constants/config';
+import type { NotificationType, SearchResult, SearchTermConfig } from '../types';
+import { NOTIFICATION_CONFIG, SEARCH_TERMS, SEARCH_TERMS_ONE_YEAR } from '../constants/config';
 import { MESSAGES } from '../constants/messages';
 
 export const useChromeActions = (onShowMessage?: (title: string, message: string, type: NotificationType) => void) => {
@@ -63,21 +63,21 @@ export const useChromeActions = (onShowMessage?: (title: string, message: string
 
       const results = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
-        func: (searchTerms: string[]) => {
+        func: (searchTerms: SearchTermConfig[], searchTermsOneYear: SearchTermConfig[]) => {
           const rows = Array.from(document.querySelectorAll('#msg table tr'));
-          return searchTerms.map(term => {
+          return [...searchTerms, ...searchTermsOneYear].map(({ term, timeRange }) => {
             for (const row of rows) {
               const cells = Array.from(row.querySelectorAll('td'));
               const dateCell = cells.find(cell => /\d{1,2}\/\d{1,2}\/\d{4}/.test(cell.innerText));
               const matchingCell = cells.find(cell => cell.innerText.toLowerCase().includes(term.toLowerCase()));
               if (dateCell && matchingCell) {
-                return { term, date: dateCell.innerText };
+                return { term, date: dateCell.innerText, timeRange };
               }
             }
-            return { term, date: null };
+            return { term, date: null, timeRange };
           });
         },
-        args: [SEARCH_TERMS],
+        args: [SEARCH_TERMS, SEARCH_TERMS_ONE_YEAR],
       });
 
       return results[0]?.result || null;

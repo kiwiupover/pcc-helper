@@ -1,8 +1,16 @@
-export type NotificationType = 'info' | 'error' | 'success';
+export type NotificationType = 'info' | 'error';
+
+export type TimeRange = 'THREE_MONTHS' | 'ONE_YEAR';
+
+export interface SearchTermConfig {
+  term: string;
+  timeRange: TimeRange;
+}
 
 export interface SearchResult {
   term: string;
   date: string | null;
+  timeRange: TimeRange;
 }
 
 export interface ButtonProps {
