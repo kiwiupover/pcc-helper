@@ -28,167 +28,95 @@ export const useChromeActions = (onShowMessage?: (title: string, message: string
     [onShowMessage],
   );
 
-  const injectContentScript = useCallback(async () => {
-    try {
-      const tab = await getCurrentTab();
-      if (!tab?.url) return;
-
-      if (tab.url.startsWith('about:') || tab.url.startsWith('chrome:')) {
-        showNotification(ERROR_MESSAGES.INJECT_ERROR_TITLE, ERROR_MESSAGES.INJECT_ERROR, 'error');
-        return;
-      }
-
-      const isValid = await isValidPage();
-      if (!isValid) {
-        showNotification(ERROR_MESSAGES.INVALID_PAGE, ERROR_MESSAGES.WRONG_PAGE_INSTRUCTION, 'error');
-        return;
-      }
-    } catch (err) {
-      if (err instanceof Error && err.message.includes('Cannot access a chrome:// URL')) {
-        showNotification(ERROR_MESSAGES.INJECT_ERROR_TITLE, ERROR_MESSAGES.INJECT_ERROR, 'error');
-      }
-      console.error('Error injecting content script:', err);
-    }
-  }, [getCurrentTab, showNotification]);
-
   const isValidPage = useCallback(async () => {
     const tab = await getCurrentTab();
     if (!tab?.url) return false;
-
     const isValid = tab.url.includes('client/cp_assessment.jsp');
     console.log({ isValid });
     return isValid;
   }, [getCurrentTab]);
 
-  const findOccurrencesWithDates = useCallback(async (): Promise<SearchResult[] | null> => {
+  const injectContentScript = useCallback(async () => {
     try {
-      if (!(await isValidPage())) {
-        showNotification(ERROR_MESSAGES.INVALID_PAGE, ERROR_MESSAGES.WRONG_PAGE_INSTRUCTION, 'error');
-        return null;
+      const tab = await getCurrentTab();
+      if (!tab?.id) {
+        showNotification('Error', 'No active tab found', 'error');
+        return false;
       }
 
-      const tab = await getCurrentTab();
-      if (!tab?.id) return null;
+      if (!(await isValidPage())) {
+        showNotification(ERROR_MESSAGES.INVALID_PAGE, ERROR_MESSAGES.WRONG_PAGE_INSTRUCTION, 'error');
+        return false;
+      }
 
-      const results = await chrome.scripting.executeScript({
+      await chrome.scripting.executeScript({
         target: { tabId: tab.id },
-        func: searchTermsConfig => {
-          const rows = Array.from(document.querySelectorAll('#msg table tr'));
-          const currentDate = new Date();
-
-          return searchTermsConfig.map(config => {
-            for (const row of rows) {
-              const cells = Array.from(row.querySelectorAll('td'));
-              const dateCell = cells.find(cell => /\d{1,2}\/\d{1,2}\/\d{4}/.test(cell.innerText));
-              const matchingCell = cells.find(cell => cell.innerText.toLowerCase().includes(config.term.toLowerCase()));
-
-              if (dateCell && matchingCell) {
-                const dateText = dateCell.innerText;
-                const [month, day, year] = dateText.split('/').map(Number);
-                const date = new Date(year, month - 1, day);
-
-                // Set both dates to start of day for accurate comparison
-                date.setHours(0, 0, 0, 0);
-                const compareDate = new Date(currentDate);
-                compareDate.setHours(0, 0, 0, 0);
-
-                let isOld = false;
-                if (config.timeRange === 'THREE_MONTHS') {
-                  const threeMonthsAgo = new Date(compareDate.getTime() - TIME_RANGES.THREE_MONTHS);
-                  isOld = date.getTime() < threeMonthsAgo.getTime();
-                } else if (config.timeRange === 'ONE_YEAR') {
-                  const oneYearAgo = new Date(compareDate.getTime() - TIME_RANGES.ONE_YEAR);
-                  isOld = date.getTime() < oneYearAgo.getTime();
-                }
-
-                return { term: config.term, date: dateText, isOld };
-              }
-            }
-            return { term: config.term, date: null, isOld: false };
-          });
-        },
-        args: [ALL_SEARCH_TERMS],
+        files: ['contentScript.js'], // Updated path
       });
-
-      return results[0]?.result || null;
+      return true;
     } catch (err) {
-      console.error('Error finding occurrences with dates:', err);
-      return null;
+      console.error('Error injecting content script:', err);
+      showNotification(
+        'Error',
+        `Failed to inject content script: ${err instanceof Error ? err.message : 'Unknown error'}`,
+        'error',
+      );
+      return false;
     }
-  }, [getCurrentTab, isValidPage, showNotification]);
+  }, [getCurrentTab, showNotification, isValidPage]);
 
   const clickViewAllCheckbox = useCallback(async () => {
     try {
-      if (!(await isValidPage())) {
-        showNotification(ERROR_MESSAGES.INVALID_PAGE, ERROR_MESSAGES.WRONG_PAGE_INSTRUCTION, 'error');
-        return 'invalid_page';
+      const tab = await getCurrentTab();
+      if (!tab?.id) {
+        showNotification('Error', 'No active tab found', 'error');
+        return 'error';
       }
 
-      const tab = await getCurrentTab();
-      if (!tab?.id) return;
+      // Send message to content script to click checkbox
+      const response = await chrome.tabs.sendMessage(tab.id, { action: 'clickViewAllCheckbox' });
 
-      // First check if checkbox exists and needs to be clicked
-      const checkResults = await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        func: () => {
-          const viewAllCheckbox = document.querySelector(
-            'input[type="checkbox"][name="ESOLviewall"][value="Y"]',
-          ) as HTMLInputElement | null;
+      if (!response) {
+        showNotification('Error', 'No response from content script', 'error');
+        return 'error';
+      }
 
-          if (viewAllCheckbox) {
-            if (!viewAllCheckbox.checked) {
-              return 'needs_click';
-            }
-            return 'already_checked';
-          }
-          return 'not_found';
-        },
-      });
-
-      const initialStatus = checkResults[0]?.result;
-
-      if (initialStatus === 'already_checked') {
+      if (response.success) {
+        return 'clicked';
+      } else {
         showNotification('Already Checked', ERROR_MESSAGES.CHECKBOX_ALREADY_CHECKED, 'info');
         return 'already_checked';
       }
-
-      if (initialStatus === 'not_found') {
-        showNotification('Not Found', ERROR_MESSAGES.CHECKBOX_NOT_FOUND, 'error');
-        return 'not_found';
-      }
-
-      // If we need to click, set up a listener for the page load
-      const pageLoadPromise = new Promise<void>(resolve => {
-        const onUpdated = (tabId: number, changeInfo: chrome.tabs.TabChangeInfo) => {
-          if (tabId === tab.id && changeInfo.status === 'complete') {
-            chrome.tabs.onUpdated.removeListener(onUpdated);
-            resolve();
-          }
-        };
-        chrome.tabs.onUpdated.addListener(onUpdated);
-      });
-
-      // Click the checkbox
-      await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        func: () => {
-          const viewAllCheckbox = document.querySelector(
-            'input[type="checkbox"][name="ESOLviewall"][value="Y"]',
-          ) as HTMLInputElement;
-          viewAllCheckbox.click();
-        },
-      });
-
-      // Wait for the page to finish loading
-      await pageLoadPromise;
-
-      showNotification('Success', ERROR_MESSAGES.CHECKBOX_CLICKED, 'success');
-      return 'clicked';
     } catch (err) {
-      console.error('Error clicking view all checkbox:', err);
+      console.error('Error clicking checkbox:', err);
+      showNotification('Error', 'Failed to click checkbox. Please try again.', 'error');
       return 'error';
     }
-  }, [getCurrentTab, isValidPage, showNotification]);
+  }, [getCurrentTab, showNotification]);
+
+  const findOccurrencesWithDates = useCallback(async () => {
+    try {
+      const tab = await getCurrentTab();
+      if (!tab?.id) {
+        showNotification('Error', 'No active tab found', 'error');
+        return null;
+      }
+
+      // Send message to content script to find occurrences
+      const response = await chrome.tabs.sendMessage(tab.id, { action: 'findOccurrences' });
+
+      if (!response || !response.results) {
+        showNotification('Error', 'No response from content script', 'error');
+        return null;
+      }
+
+      return response.results;
+    } catch (err) {
+      console.error('Error finding occurrences:', err);
+      showNotification('Error', 'Failed to find occurrences. Please try again.', 'error');
+      return null;
+    }
+  }, [getCurrentTab, showNotification]);
 
   return {
     injectContentScript,

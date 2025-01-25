@@ -27,8 +27,18 @@ const Popup = () => {
     setIsProcessing(true);
     setErrorMessage(null);
     try {
-      await injectContentScript();
-      await clickViewAllCheckbox();
+      const injected = await injectContentScript();
+      if (!injected) {
+        setIsProcessing(false);
+        return;
+      }
+
+      const checkboxStatus = await clickViewAllCheckbox();
+      if (checkboxStatus === 'error' || checkboxStatus === 'not_found') {
+        setIsProcessing(false);
+        return;
+      }
+
       const results = await findOccurrencesWithDates();
       if (results) {
         const formattedResults = results.map(result => {
@@ -41,6 +51,12 @@ const Popup = () => {
         });
         setSearchResults(formattedResults);
       }
+    } catch (error) {
+      console.error('Error in handleStart:', error);
+      setErrorMessage({
+        title: 'Error',
+        message: 'An unexpected error occurred. Please try again.',
+      });
     } finally {
       setIsProcessing(false);
     }
@@ -51,7 +67,10 @@ const Popup = () => {
 
   return (
     <div className="min-w-[450px] bg-slate-50 p-4">
-      <header className="mb-4 text-xl font-semibold text-gray-900">PCC Helper</header>
+      <header className="mb-4 text-xl font-semibold text-gray-900">
+        PCC Helper
+        <span className="ml-2 text-sm text-gray-500">v{chrome.runtime.getManifest().version}</span>
+      </header>
 
       <main className="space-y-4">
         <ActionButton
