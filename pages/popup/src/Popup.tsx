@@ -6,11 +6,12 @@ import { ErrorMessage } from './components/ErrorMessage';
 import { useChromeActions } from './hooks/useChromeActions';
 import { useExtensionVersion } from './hooks/useExtensionVersion';
 import { MESSAGES } from './constants/messages';
-import type { SearchResult } from './types';
+import type { SearchResult, PsychotropicResult } from './types';
 import { isDateTooOld } from './constants/config';
 
 const Popup = () => {
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [psychotropicResults, setPsychotropicResults] = useState<PsychotropicResult[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<{ title: string; message: string } | null>(null);
 
@@ -28,19 +29,30 @@ const Popup = () => {
   const { injectContentScript, findOccurrencesWithDates, clickViewAllCheckbox } = useChromeActions(handleShowMessage);
   const version = useExtensionVersion();
 
-  const handleStart = useCallback(async () => {
-    setIsProcessing(true);
-    setErrorMessage(null);
-    try {
-      await injectContentScript();
-      await clickViewAllCheckbox();
-      const results = await findOccurrencesWithDates();
-      if (results) {
-        setSearchResults(results);
+  useEffect(() => {
+    const fetchResults = async () => {
+      try {
+        setIsProcessing(true);
+        await injectContentScript();
+        await clickViewAllCheckbox();
+        const results = await findOccurrencesWithDates();
+        if (results) {
+          setSearchResults(results.searchResults);
+          setPsychotropicResults(results.psychotropicResults);
+        } else {
+          setSearchResults([]);
+          setPsychotropicResults([]);
+        }
+      } catch (error) {
+        console.error('Error fetching results:', error);
+        setSearchResults([]);
+        setPsychotropicResults([]);
+      } finally {
+        setIsProcessing(false);
       }
-    } finally {
-      setIsProcessing(false);
-    }
+    };
+
+    fetchResults();
   }, [injectContentScript, clickViewAllCheckbox, findOccurrencesWithDates]);
 
   const isDateOld = (dateStr: string, timeRange: TimeRange, status: string | null) => {
@@ -61,7 +73,7 @@ const Popup = () => {
 
       <main className="space-y-4">
         <ActionButton
-          onClick={handleStart}
+          onClick={() => {}}
           disabled={isProcessing}
           className="w-full bg-blue-500 py-3 text-lg font-semibold text-white hover:bg-blue-600">
           {isProcessing ? 'Processing...' : 'Start PCC Helper'}
@@ -142,6 +154,31 @@ const Popup = () => {
                       <td className="border border-gray-100 px-2 py-1 text-gray-600">{result.term}</td>
                       <td className="border border-gray-100 px-2 py-1 text-gray-600">{result.status || '-'}</td>
                       <td className="border border-gray-100 px-2 py-1 text-gray-600">{result.date || '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Psychotropic Drug and Behavior */}
+        {psychotropicResults.length > 0 && (
+          <div className="mt-3">
+            <h2 className="text-sm font-medium text-blue-500 mb-1">Psychotropic Drug and Behavior</h2>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs border-collapse border border-gray-100">
+                <thead className="bg-white">
+                  <tr>
+                    <th className="border border-gray-100 px-2 py-1 text-left text-gray-400">Date</th>
+                    <th className="border border-gray-100 px-2 py-1 text-left text-gray-400">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {psychotropicResults.map((result, index) => (
+                    <tr key={index}>
+                      <td className="border border-gray-100 px-2 py-1 text-gray-600">{result.date}</td>
+                      <td className="border border-gray-100 px-2 py-1 text-gray-600">{result.status}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -14,6 +14,11 @@ export interface SearchResult {
   status: string | null;
 }
 
+export interface PsychotropicResult {
+  date: string;
+  status: string;
+}
+
 export interface ButtonProps {
   onClick: () => void;
   children: React.ReactNode;

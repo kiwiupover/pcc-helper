@@ -51,7 +51,10 @@ export const useChromeActions = (onShowMessage?: (title: string, message: string
     return isValid;
   }, [getCurrentTab]);
 
-  const findOccurrencesWithDates = useCallback(async (): Promise<SearchResult[] | null> => {
+  const findOccurrencesWithDates = useCallback(async (): Promise<{
+    searchResults: SearchResult[];
+    psychotropicResults: PsychotropicResult[];
+  } | null> => {
     try {
       if (!(await isValidPage())) {
         showNotification('Invalid Page', MESSAGES.INVALID_PAGE, 'error');
@@ -59,7 +62,10 @@ export const useChromeActions = (onShowMessage?: (title: string, message: string
       }
 
       const tab = await getCurrentTab();
-      if (!tab?.id) return null;
+      if (!tab?.id) {
+        console.error('No active tab found');
+        return null;
+      }
 
       const results = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
@@ -76,7 +82,7 @@ export const useChromeActions = (onShowMessage?: (title: string, message: string
 
           // Find the header row to locate the Status column index
           const headerRow = rows[0];
-          if (!headerRow) return [];
+          if (!headerRow) return { searchResults: [], psychotropicResults: [] };
 
           const headers = Array.from(headerRow.querySelectorAll('th')).map(th => th.innerText.trim());
           const statusColumnIndex = headers.findIndex(header => header === 'Status');
@@ -84,7 +90,30 @@ export const useChromeActions = (onShowMessage?: (title: string, message: string
           console.log('Table headers:', headers);
           console.log('Status column index:', statusColumnIndex);
 
-          return allTerms.map(({ term, timeRange }) => {
+          // Find all psychotropic references
+          const psychotropicResults = [];
+          for (const row of rows.slice(1)) {
+            const cells = Array.from(row.querySelectorAll('td'));
+            const dateCell = cells.find(cell => /\d{1,2}\/\d{1,2}\/\d{4}/.test(cell.innerText));
+            const matchingCell = cells.find(cell =>
+              cell.innerText.toLowerCase().includes('psychotropic drug and behavior'),
+            );
+
+            if (dateCell && matchingCell) {
+              const status =
+                statusColumnIndex >= 0 && cells[statusColumnIndex]
+                  ? cells[statusColumnIndex].innerText.trim()
+                  : 'Unknown';
+
+              psychotropicResults.push({
+                date: dateCell.innerText,
+                status,
+              });
+            }
+          }
+
+          // Regular search results
+          const searchResults = allTerms.map(({ term, timeRange }) => {
             console.log(`\nSearching for term: "${term}" (${timeRange})`);
 
             // Skip header row in search
@@ -94,7 +123,6 @@ export const useChromeActions = (onShowMessage?: (title: string, message: string
               const matchingCell = cells.find(cell => cell.innerText.toLowerCase().includes(term.toLowerCase()));
 
               if (dateCell && matchingCell) {
-                // Get status from the correct column if it exists
                 const status =
                   statusColumnIndex >= 0 && cells[statusColumnIndex] ? cells[statusColumnIndex].innerText.trim() : null;
 
@@ -112,12 +140,14 @@ export const useChromeActions = (onShowMessage?: (title: string, message: string
             console.log(`Item not found: ${term}`);
             return { term, date: null, timeRange, status: null };
           });
+
+          return { searchResults, psychotropicResults };
         },
         args: [SEARCH_TERMS, SEARCH_TERMS_ONE_YEAR, SEARCH_TERMS_ONE_TIME],
       });
 
       console.log('Search results:', results[0]?.result);
-      return results[0]?.result || null;
+      return results[0]?.result || { searchResults: [], psychotropicResults: [] };
     } catch (err) {
       console.error('Error finding occurrences with dates:', err);
       return null;
