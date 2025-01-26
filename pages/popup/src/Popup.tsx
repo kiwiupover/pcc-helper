@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { ActionButton } from './components/ActionButton';
 import { ErrorMessage } from './components/ErrorMessage';
 import { useChromeActions } from './hooks/useChromeActions';
+import { useExtensionVersion } from './hooks/useExtensionVersion';
 import { MESSAGES } from './constants/messages';
 import type { SearchResult } from './types';
 import { isDateTooOld } from './constants/config';
@@ -25,6 +26,7 @@ const Popup = () => {
   }, []);
 
   const { injectContentScript, findOccurrencesWithDates, clickViewAllCheckbox } = useChromeActions(handleShowMessage);
+  const version = useExtensionVersion();
 
   const handleStart = useCallback(async () => {
     setIsProcessing(true);
@@ -41,17 +43,21 @@ const Popup = () => {
     }
   }, [injectContentScript, clickViewAllCheckbox, findOccurrencesWithDates]);
 
-  const foundResults = searchResults.filter(result => result.date !== null);
-  const notFoundResults = searchResults.filter(result => result.date === null);
-
-  const isDateOld = (dateStr: string, timeRange: TimeRange) => {
+  const isDateOld = (dateStr: string, timeRange: TimeRange, status: string | null) => {
     const [month, day, year] = dateStr.split('/').map(Number);
-    return isDateTooOld(new Date(year, month - 1, day), timeRange);
+    return isDateTooOld(new Date(year, month - 1, day), timeRange, status);
   };
+
+  const foundResults = searchResults.filter(result => result.date !== null);
+  const validResults = foundResults.filter(result => !isDateOld(result.date!, result.timeRange, result.status));
+  const expiredResults = foundResults.filter(result => isDateOld(result.date!, result.timeRange, result.status));
+  const notFoundResults = searchResults.filter(result => result.date === null);
 
   return (
     <div className="min-w-[450px] bg-white p-4">
-      <header className="mb-4 text-2xl font-semibold text-gray-900">PCC Helper</header>
+      <header className="mb-4 text-2xl font-semibold text-gray-900">
+        PCC Helper <span className="text-xs text-gray-500">v{version}</span>
+      </header>
 
       <main className="space-y-4">
         <ActionButton
@@ -64,26 +70,26 @@ const Popup = () => {
         {errorMessage && <ErrorMessage title={errorMessage.title} message={errorMessage.message} />}
 
         {/* Valid Items */}
-        {foundResults.filter(result => result.date && !isDateOld(result.date, result.timeRange)).length > 0 && (
-          <div className="mt-4">
-            <h2 className="text-lg text-[#34C759] mb-2">Valid Items</h2>
+        {validResults.length > 0 && (
+          <div className="mt-3">
+            <h2 className="text-sm font-medium text-[#34C759] mb-1">Valid Items</h2>
             <div className="overflow-x-auto">
-              <table className="min-w-full table-auto border-collapse">
-                <thead>
+              <table className="w-full text-xs border-collapse border border-gray-100">
+                <thead className="bg-white">
                   <tr>
-                    <th className="border border-gray-200 px-4 py-2 text-left text-gray-400">Term</th>
-                    <th className="border border-gray-200 px-4 py-2 text-left text-gray-400">Date</th>
+                    <th className="border border-gray-100 px-2 py-1 text-left text-gray-400">Item</th>
+                    <th className="border border-gray-100 px-2 py-1 text-left text-gray-400">Status</th>
+                    <th className="border border-gray-100 px-2 py-1 text-left text-gray-400">Date</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {foundResults
-                    .filter(result => result.date && !isDateOld(result.date, result.timeRange))
-                    .map((result, index) => (
-                      <tr key={index}>
-                        <td className="border border-gray-200 px-4 py-2 text-gray-900">{result.term}</td>
-                        <td className="border border-gray-200 px-4 py-2 text-gray-900">{result.date}</td>
-                      </tr>
-                    ))}
+                  {validResults.map((result, index) => (
+                    <tr key={index}>
+                      <td className="border border-gray-100 px-2 py-1 text-gray-600">{result.term}</td>
+                      <td className="border border-gray-100 px-2 py-1 text-gray-600">{result.status || '-'}</td>
+                      <td className="border border-gray-100 px-2 py-1 text-gray-600">{result.date}</td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
@@ -91,26 +97,26 @@ const Popup = () => {
         )}
 
         {/* Expired Items */}
-        {foundResults.filter(result => result.date && isDateOld(result.date, result.timeRange)).length > 0 && (
-          <div className="mt-4">
-            <h2 className="text-lg text-[#FF3B30] mb-2">Over Due</h2>
+        {expiredResults.length > 0 && (
+          <div className="mt-3">
+            <h2 className="text-sm font-medium text-[#FF3B30] mb-1">Over Due</h2>
             <div className="overflow-x-auto">
-              <table className="min-w-full table-auto border-collapse">
-                <thead>
+              <table className="w-full text-xs border-collapse border border-gray-100">
+                <thead className="bg-white">
                   <tr>
-                    <th className="border border-gray-200 px-4 py-2 text-left text-gray-400">Term</th>
-                    <th className="border border-gray-200 px-4 py-2 text-left text-gray-400">Date</th>
+                    <th className="border border-gray-100 px-2 py-1 text-left text-gray-400">Item</th>
+                    <th className="border border-gray-100 px-2 py-1 text-left text-gray-400">Status</th>
+                    <th className="border border-gray-100 px-2 py-1 text-left text-gray-400">Date</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {foundResults
-                    .filter(result => result.date && isDateOld(result.date, result.timeRange))
-                    .map((result, index) => (
-                      <tr key={index}>
-                        <td className="border border-gray-200 px-4 py-2 text-gray-900">{result.term}</td>
-                        <td className="border border-gray-200 px-4 py-2 text-gray-900">{result.date}</td>
-                      </tr>
-                    ))}
+                  {expiredResults.map((result, index) => (
+                    <tr key={index}>
+                      <td className="border border-gray-100 px-2 py-1 text-gray-600">{result.term}</td>
+                      <td className="border border-gray-100 px-2 py-1 text-gray-600">{result.status || '-'}</td>
+                      <td className="border border-gray-100 px-2 py-1 text-gray-600">{result.date}</td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
@@ -119,19 +125,23 @@ const Popup = () => {
 
         {/* Not Found Items */}
         {notFoundResults.length > 0 && (
-          <div className="mt-4">
-            <h2 className="text-lg text-[#FF9500] mb-2">Not Found</h2>
+          <div className="mt-3">
+            <h2 className="text-sm font-medium text-[#FF9500] mb-1">Not Found</h2>
             <div className="overflow-x-auto">
-              <table className="min-w-full table-auto border-collapse">
-                <thead>
+              <table className="w-full text-xs border-collapse border border-gray-100">
+                <thead className="bg-white">
                   <tr>
-                    <th className="border border-gray-200 px-4 py-2 text-left text-gray-400">Term</th>
+                    <th className="border border-gray-100 px-2 py-1 text-left text-gray-400">Item</th>
+                    <th className="border border-gray-100 px-2 py-1 text-left text-gray-400">Status</th>
+                    <th className="border border-gray-100 px-2 py-1 text-left text-gray-400">Date</th>
                   </tr>
                 </thead>
                 <tbody>
                   {notFoundResults.map((result, index) => (
                     <tr key={index}>
-                      <td className="border border-gray-200 px-4 py-2 text-gray-900">{result.term}</td>
+                      <td className="border border-gray-100 px-2 py-1 text-gray-600">{result.term}</td>
+                      <td className="border border-gray-100 px-2 py-1 text-gray-600">{result.status || '-'}</td>
+                      <td className="border border-gray-100 px-2 py-1 text-gray-600">{result.date || '-'}</td>
                     </tr>
                   ))}
                 </tbody>

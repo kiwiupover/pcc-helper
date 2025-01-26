@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import type { NotificationType, SearchResult, SearchTermConfig } from '../types';
-import { NOTIFICATION_CONFIG, SEARCH_TERMS, SEARCH_TERMS_ONE_YEAR } from '../constants/config';
+import { NOTIFICATION_CONFIG, SEARCH_TERMS, SEARCH_TERMS_ONE_YEAR, SEARCH_TERMS_ONE_TIME } from '../constants/config';
 import { MESSAGES } from '../constants/messages';
 
 export const useChromeActions = (onShowMessage?: (title: string, message: string, type: NotificationType) => void) => {
@@ -63,23 +63,60 @@ export const useChromeActions = (onShowMessage?: (title: string, message: string
 
       const results = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
-        func: (searchTerms: SearchTermConfig[], searchTermsOneYear: SearchTermConfig[]) => {
+        func: (
+          searchTerms: SearchTermConfig[],
+          searchTermsOneYear: SearchTermConfig[],
+          searchTermsOneTime: SearchTermConfig[],
+        ) => {
           const rows = Array.from(document.querySelectorAll('#msg table tr'));
-          return [...searchTerms, ...searchTermsOneYear].map(({ term, timeRange }) => {
-            for (const row of rows) {
+          const allTerms = [...searchTerms, ...searchTermsOneYear, ...searchTermsOneTime];
+
+          console.log('Starting search with terms:', allTerms);
+          console.log('Found rows:', rows.length);
+
+          // Find the header row to locate the Status column index
+          const headerRow = rows[0];
+          if (!headerRow) return [];
+
+          const headers = Array.from(headerRow.querySelectorAll('th')).map(th => th.innerText.trim());
+          const statusColumnIndex = headers.findIndex(header => header === 'Status');
+
+          console.log('Table headers:', headers);
+          console.log('Status column index:', statusColumnIndex);
+
+          return allTerms.map(({ term, timeRange }) => {
+            console.log(`\nSearching for term: "${term}" (${timeRange})`);
+
+            // Skip header row in search
+            for (const row of rows.slice(1)) {
               const cells = Array.from(row.querySelectorAll('td'));
               const dateCell = cells.find(cell => /\d{1,2}\/\d{1,2}\/\d{4}/.test(cell.innerText));
               const matchingCell = cells.find(cell => cell.innerText.toLowerCase().includes(term.toLowerCase()));
+
               if (dateCell && matchingCell) {
-                return { term, date: dateCell.innerText, timeRange };
+                // Get status from the correct column if it exists
+                const status =
+                  statusColumnIndex >= 0 && cells[statusColumnIndex] ? cells[statusColumnIndex].innerText.trim() : null;
+
+                console.log(`Found item:
+                  Term: ${term}
+                  Date: ${dateCell.innerText}
+                  Status: ${status || 'None'}
+                  Row contents: ${cells.map(c => c.innerText).join(' | ')}
+                `);
+
+                return { term, date: dateCell.innerText, timeRange, status };
               }
             }
-            return { term, date: null, timeRange };
+
+            console.log(`Item not found: ${term}`);
+            return { term, date: null, timeRange, status: null };
           });
         },
-        args: [SEARCH_TERMS, SEARCH_TERMS_ONE_YEAR],
+        args: [SEARCH_TERMS, SEARCH_TERMS_ONE_YEAR, SEARCH_TERMS_ONE_TIME],
       });
 
+      console.log('Search results:', results[0]?.result);
       return results[0]?.result || null;
     } catch (err) {
       console.error('Error finding occurrences with dates:', err);
