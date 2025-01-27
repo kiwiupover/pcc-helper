@@ -62,7 +62,7 @@ export const SEARCH_TERMS: SearchTermConfig[] = [
   { term: 'Care Conference', timeRange: 'THREE_MONTHS' },
   { term: 'Quarterly social service evaluation', timeRange: 'THREE_MONTHS' },
   { term: 'Psychotropic drug and behavior monthly', timeRange: 'THREE_MONTHS' },
-  { term: 'Elopement/ Exit Seeking Evaluation', timeRange: 'THREE_MONTHS' },
+  { term: 'ELOPEMENT/EXIT-SEEKING EVALUATION', timeRange: 'THREE_MONTHS' },
   { term: 'Social Determinants of Health', timeRange: 'THREE_MONTHS' },
 ];
 
