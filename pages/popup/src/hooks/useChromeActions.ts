@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
-import type { NotificationType, SearchResult, SearchTermConfig } from '../types';
-import { NOTIFICATION_CONFIG, SEARCH_TERMS, SEARCH_TERMS_ONE_YEAR, SEARCH_TERMS_ONE_TIME } from '../constants/config';
+import type { NotificationType, SearchResult, SearchTermConfig, PsychotropicResult } from '../types';
+import { SEARCH_TERMS, SEARCH_TERMS_ONE_YEAR, SEARCH_TERMS_ONE_TIME } from '../constants/config';
 import { MESSAGES } from '../constants/messages';
 
 export const useChromeActions = (onShowMessage?: (title: string, message: string, type: NotificationType) => void) => {
@@ -19,37 +19,156 @@ export const useChromeActions = (onShowMessage?: (title: string, message: string
     [onShowMessage],
   );
 
+  const isValidPage = useCallback(async () => {
+    const tab = await getCurrentTab();
+    if (!tab?.url) return false;
+
+    const validPaths = ['client/cp_assessment.jsp', 'clinical/ordersChart.xhtml'];
+    const isValid = validPaths.some(path => tab.url!.includes(path));
+    console.log({ isValid, url: tab.url });
+    return isValid;
+  }, [getCurrentTab]);
+
   const injectContentScript = useCallback(async () => {
+    const isValid = await isValidPage();
     try {
       const tab = await getCurrentTab();
-      if (!tab?.url) return;
+      if (!tab?.url || !tab.id) return false;
 
       if (tab.url.startsWith('about:') || tab.url.startsWith('chrome:')) {
         showNotification(MESSAGES.INJECT_ERROR_TITLE, MESSAGES.INJECT_ERROR, 'error');
-        return;
+        return false;
       }
 
-      const isValid = await isValidPage();
       if (!isValid) {
         showNotification(MESSAGES.INVALID_PAGE, MESSAGES.WRONG_PAGE_INSTRUCTION, 'error');
-        return;
+        return false;
       }
+
+      // Inject content script
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => {
+          // Content script already injected
+          return true;
+        },
+      });
+
+      return true;
     } catch (err) {
       if (err instanceof Error && err.message.includes('Cannot access a chrome:// URL')) {
         showNotification(MESSAGES.INJECT_ERROR_TITLE, MESSAGES.INJECT_ERROR, 'error');
       }
       console.error('Error injecting content script:', err);
+      return false;
     }
-  }, [getCurrentTab, showNotification]);
+  }, [getCurrentTab, showNotification, isValidPage]);
 
-  const isValidPage = useCallback(async () => {
-    const tab = await getCurrentTab();
-    if (!tab?.url) return false;
+  const findText = useCallback(
+    async (query: string): Promise<Array<{ text: string; startDate: string }>> => {
+      console.log(`Starting text search for: ${query}`);
+      try {
+        const tab = await getCurrentTab();
+        if (!tab?.id) {
+          console.error('No active tab found');
+          return [];
+        }
 
-    const isValid = tab.url.includes('client/cp_assessment.jsp');
-    console.log({ isValid });
-    return isValid;
-  }, [getCurrentTab]);
+        // Inject content script first
+        console.log('Attempting to inject content script...');
+        const injected = await injectContentScript();
+        if (!injected) {
+          console.error('Failed to inject content script');
+          showNotification('Search Error', 'Failed to prepare the page for search. Please try again.', 'error');
+          return [];
+        }
+        console.log('Content script injected successfully');
+
+        // Search for text
+        const results = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: (searchQuery: string) => {
+            // Normalize search query
+            const normalizedQuery = searchQuery.toLowerCase();
+
+            // First try to find orders in the table
+            const orderRows = Array.from(document.querySelectorAll('table tr'));
+            const matches = [];
+
+            // Search in table rows
+            for (const row of orderRows) {
+              const cells = Array.from(row.querySelectorAll('td'));
+              for (const cell of cells) {
+                // Get the raw text content and normalize it
+                const cellText = cell.innerHTML
+                  .replace(/<br\s*\/?>/gi, '\n') // Convert <br> to newlines
+                  .replace(/<[^>]*>/g, '') // Remove other HTML tags
+                  .replace(/[\t\f\r ]+/g, ' ') // Normalize horizontal whitespace
+                  .replace(/\n[\t\f\r ]+/g, '\n') // Remove leading whitespace after newlines
+                  .replace(/[\t\f\r ]+\n/g, '\n') // Remove trailing whitespace before newlines
+                  .replace(/\n+/g, '\n') // Normalize multiple newlines to single
+                  .replace(/^\s+/, '') // Remove leading whitespace
+                  .replace(/\s+$/, ''); // Remove trailing whitespace
+
+                if (cellText.toLowerCase().includes(normalizedQuery)) {
+                  // Get the start date from the row
+                  const startDateCell = row.querySelector('.atOStart');
+                  const startDate = startDateCell?.textContent?.split(' ')[0] || '';
+                  matches.push({ text: cellText, startDate });
+                  break; // Found a match in this row, move to next row
+                }
+              }
+            }
+
+            // If no matches found in table, search all text nodes
+            if (matches.length === 0) {
+              // Try specific order elements first
+              const orderElements = Array.from(document.querySelectorAll('.order-item, .order-name, .order-details'));
+              for (const element of orderElements) {
+                const text = element.textContent || '';
+                if (text.toLowerCase().includes(normalizedQuery)) {
+                  matches.push({ text: text.trim(), startDate: '' });
+                }
+              }
+
+              // If still no matches, search all text nodes
+              if (matches.length === 0) {
+                const textNodes = document.evaluate(
+                  '//text()',
+                  document,
+                  null,
+                  XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,
+                  null,
+                );
+
+                for (let i = 0; i < textNodes.snapshotLength; i++) {
+                  const node = textNodes.snapshotItem(i);
+                  if (node && node.textContent) {
+                    const text = node.textContent.trim();
+                    if (text && text.toLowerCase().includes(normalizedQuery)) {
+                      matches.push({ text, startDate: '' });
+                    }
+                  }
+                }
+              }
+            }
+
+            return matches;
+          },
+          args: [query],
+        });
+
+        const matches = results[0]?.result || [];
+        console.log(`Found ${matches.length} matches for: ${query}`);
+        return matches;
+      } catch (err) {
+        console.error('Error finding text:', err);
+        showNotification('Search Error', 'An error occurred while searching. Please try again.', 'error');
+        return [];
+      }
+    },
+    [getCurrentTab, injectContentScript, showNotification],
+  );
 
   const findOccurrencesWithDates = useCallback(async (): Promise<{
     searchResults: SearchResult[];
@@ -219,7 +338,7 @@ export const useChromeActions = (onShowMessage?: (title: string, message: string
       // Wait for the page to finish loading
       await pageLoadPromise;
 
-      showNotification('Success', MESSAGES.CHECKBOX_CLICKED, 'success');
+      showNotification('Success', MESSAGES.CHECKBOX_CLICKED, 'info');
       return 'clicked';
     } catch (err) {
       console.error('Error clicking view all checkbox:', err);
@@ -229,6 +348,7 @@ export const useChromeActions = (onShowMessage?: (title: string, message: string
 
   return {
     injectContentScript,
+    findText,
     findOccurrencesWithDates,
     clickViewAllCheckbox,
   };
