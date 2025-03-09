@@ -1,15 +1,20 @@
-name: Build And Upload Extension Zip Via Artifact
+name: Build And Upload Extension Zip
 
 on:
   push:
     branches: [ main ]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number (e.g. 1.0.0)'
+        required: true
+        type: string
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
-
+    
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -19,9 +24,17 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile --prefer-offline
-
       - run: pnpm build
 
-      - uses: actions/upload-artifact@v4
+      - name: Create extension zip
+        run: |
+          cd dist
+          zip -r ../pcc-v${{ github.event.inputs.version || 'dev' }}.zip *
+          cd ..
+
+      - name: Upload zip artifact
+        uses: actions/upload-artifact@v4
         with:
-          path: dist/*
+          name: pcc-v${{ github.event.inputs.version || 'dev' }}
+          path: pcc-v${{ github.event.inputs.version || 'dev' }}.zip
+          retention-days: 30
