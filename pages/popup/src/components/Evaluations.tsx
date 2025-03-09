@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { ActionButton } from './ActionButton';
-import { ErrorMessage } from './ErrorMessage';
+import { Alert } from './Alert';
 import type { SearchResult, PsychotropicResult, NotificationType, TimeRange } from '../types';
 import { useChromeActions } from '../hooks/useChromeActions';
 
@@ -13,6 +13,7 @@ export const Evaluations = ({ isDateOld }: EvaluationsProps) => {
   const [errorMessage, setErrorMessage] = useState<{ title: string; message: string } | null>(null);
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [psychotropicResults, setPsychotropicResults] = useState<PsychotropicResult[]>([]);
+  const [isValidUrl, setIsValidUrl] = useState(false);
 
   const handleShowMessage = (title: string, message: string, type: NotificationType) => {
     if (type === 'error') {
@@ -20,7 +21,18 @@ export const Evaluations = ({ isDateOld }: EvaluationsProps) => {
     }
   };
 
-  const { injectContentScript, findOccurrencesWithDates, clickViewAllCheckbox } = useChromeActions(handleShowMessage);
+  const { injectContentScript, findOccurrencesWithDates, clickViewAllCheckbox, isEvaluationsPage } =
+    useChromeActions(handleShowMessage);
+
+  // Check URL when component mounts
+  useEffect(() => {
+    const checkUrl = async () => {
+      const isValid = await isEvaluationsPage();
+      setIsValidUrl(isValid);
+    };
+
+    checkUrl();
+  }, [isEvaluationsPage]);
 
   const foundResults = searchResults.filter(result => result.date !== null);
   const validResults = foundResults.filter(result => !isDateOld(result.date!, result.timeRange, result.status));
@@ -55,15 +67,22 @@ export const Evaluations = ({ isDateOld }: EvaluationsProps) => {
   };
   return (
     <>
-      <ActionButton
-        onClick={onStartClick}
-        disabled={isProcessing}
-        size="sm"
-        className="w-full bg-blue-500 py-3 text-lg font-semibold text-white hover:bg-blue-600">
-        {isProcessing ? 'Processing...' : 'Start Evaluation'}
-      </ActionButton>
+      {isValidUrl ? (
+        <ActionButton
+          onClick={onStartClick}
+          disabled={isProcessing}
+          size="sm"
+          className="w-full bg-blue-500 py-3 text-lg font-semibold text-white hover:bg-blue-600">
+          {isProcessing ? 'Processing...' : 'Start Evaluation'}
+        </ActionButton>
+      ) : (
+        <Alert
+          message="Please navigate to the evaluations page to start processing evaluations. Make sure you're on the correct page before proceeding."
+          variant="info"
+        />
+      )}
 
-      {errorMessage && <ErrorMessage title={errorMessage.title} message={errorMessage.message} />}
+      {errorMessage && <Alert title={errorMessage.title} message={errorMessage.message} variant="error" />}
 
       {/* Valid Items */}
       {validResults.length > 0 && (

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ActionButton } from './ActionButton';
-import { ErrorMessage } from './ErrorMessage';
+import { Alert } from './Alert';
 import { useChromeActions } from '@src/hooks/useChromeActions';
 import type { NotificationType } from '@src/types';
 
@@ -38,7 +38,7 @@ export const Orders = ({ currentUrl }: OrdersProps) => {
     if (!isValidUrl) {
       setErrorMessage({
         title: 'Wrong Page',
-        message: 'Please navigate to the Orders Chart page (clinical/ordersChart.xhtml) to use this feature',
+        message: 'Please navigate to the Orders Chart page to use this feature',
       });
       return;
     }
@@ -104,7 +104,10 @@ export const Orders = ({ currentUrl }: OrdersProps) => {
 
   if (!isValidUrl) {
     return (
-      <div className="py-8 text-center text-gray-500">Please navigate to the Orders Chart page to use this feature</div>
+      <Alert
+        variant="info"
+        message="Please navigate to the orders chart page to start processing orders. Make sure you're on the correct page before proceeding."
+      />
     );
   }
 
@@ -118,7 +121,7 @@ export const Orders = ({ currentUrl }: OrdersProps) => {
         {isProcessing ? 'Searching for orders...' : 'Evaluate Orders'}
       </ActionButton>
 
-      {errorMessage && <ErrorMessage title={errorMessage.title} message={errorMessage.message} />}
+      {errorMessage && <Alert variant="error" title={errorMessage.title} message={errorMessage.message} />}
 
       <div className="mt-3">
         <div className="overflow-x-auto">

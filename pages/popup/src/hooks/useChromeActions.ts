@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import type { NotificationType, SearchResult, SearchTermConfig, PsychotropicResult } from '../types';
 import { SEARCH_TERMS, SEARCH_TERMS_ONE_YEAR, SEARCH_TERMS_ONE_TIME } from '../constants/config';
 import { MESSAGES } from '../constants/messages';
@@ -19,18 +19,54 @@ export const useChromeActions = (onShowMessage?: (title: string, message: string
     [onShowMessage],
   );
 
-  const isValidPage = useCallback(async () => {
-    const tab = await getCurrentTab();
-    if (!tab?.url) return false;
+  // Define valid paths in a useMemo to maintain referential stability
+  const VALID_PATHS = useMemo(
+    () =>
+      ({
+        evaluations: '/admin/client/cp_assessment.jsp',
+        orders: '/clinical/ordersChart.xhtml',
+      }) as const,
+    [],
+  );
 
-    const validPaths = ['client/cp_assessment.jsp', 'clinical/ordersChart.xhtml'];
-    const isValid = validPaths.some(path => tab.url!.includes(path));
-    console.log({ isValid, url: tab.url });
-    return isValid;
-  }, [getCurrentTab]);
+  const isValidPage = useCallback(
+    async (specificPath?: '/admin/client/cp_assessment.jsp' | '/clinical/ordersChart.xhtml') => {
+      const tab = await getCurrentTab();
+      if (!tab?.url) return false;
+
+      // If URL is a special browser URL, it's not valid
+      if (tab.url.startsWith('chrome://') || tab.url.startsWith('about:')) {
+        return false;
+      }
+
+      try {
+        const url = new URL(tab.url);
+
+        // If a specific path is provided, check only that path
+        if (specificPath) {
+          return url.pathname === specificPath;
+        }
+
+        // Otherwise check all valid paths
+        const validPaths = ['/admin/client/cp_assessment.jsp', '/clinical/ordersChart.xhtml'] as const;
+        return validPaths.includes(url.pathname as (typeof validPaths)[number]);
+      } catch (error) {
+        console.error('Error parsing URL:', error);
+        return false;
+      }
+    },
+    [getCurrentTab],
+  );
+
+  const isEvaluationsPage = useCallback(async () => {
+    return isValidPage(VALID_PATHS.evaluations);
+  }, [isValidPage, VALID_PATHS.evaluations]);
+
+  const isOrdersPage = useCallback(async () => {
+    return isValidPage(VALID_PATHS.orders);
+  }, [isValidPage, VALID_PATHS.orders]);
 
   const injectContentScript = useCallback(async () => {
-    const isValid = await isValidPage();
     try {
       const tab = await getCurrentTab();
       if (!tab?.url || !tab.id) return false;
@@ -40,8 +76,14 @@ export const useChromeActions = (onShowMessage?: (title: string, message: string
         return false;
       }
 
+      // Check if we're on a valid page
+      const isValid = await isValidPage(VALID_PATHS.evaluations);
       if (!isValid) {
-        showNotification(MESSAGES.INVALID_PAGE, MESSAGES.WRONG_PAGE_INSTRUCTION, 'error');
+        showNotification(
+          'Invalid Page',
+          `Please navigate to the evaluations page at ${VALID_PATHS.evaluations} to start processing evaluations.`,
+          'error',
+        );
         return false;
       }
 
@@ -62,7 +104,7 @@ export const useChromeActions = (onShowMessage?: (title: string, message: string
       console.error('Error injecting content script:', err);
       return false;
     }
-  }, [getCurrentTab, showNotification, isValidPage]);
+  }, [getCurrentTab, showNotification, isValidPage, VALID_PATHS.evaluations]);
 
   const findText = useCallback(
     async (query: string): Promise<Array<{ text: string; startDate: string }>> => {
@@ -175,8 +217,14 @@ export const useChromeActions = (onShowMessage?: (title: string, message: string
     psychotropicResults: PsychotropicResult[];
   } | null> => {
     try {
-      if (!(await isValidPage())) {
-        showNotification('Invalid Page', MESSAGES.INVALID_PAGE, 'error');
+      // Check if we're on the evaluations page
+      const isValid = await isEvaluationsPage();
+      if (!isValid) {
+        showNotification(
+          'Invalid Page',
+          `Please navigate to the evaluations page at ${VALID_PATHS.evaluations} to start processing evaluations.`,
+          'error',
+        );
         return null;
       }
 
@@ -271,11 +319,11 @@ export const useChromeActions = (onShowMessage?: (title: string, message: string
       console.error('Error finding occurrences with dates:', err);
       return null;
     }
-  }, [getCurrentTab, isValidPage, showNotification]);
+  }, [getCurrentTab, isEvaluationsPage, showNotification, VALID_PATHS.evaluations]);
 
   const clickViewAllCheckbox = useCallback(async () => {
     try {
-      if (!(await isValidPage())) {
+      if (!(await isValidPage(VALID_PATHS.evaluations))) {
         showNotification('Invalid Page', MESSAGES.INVALID_PAGE, 'error');
         return 'invalid_page';
       }
@@ -344,12 +392,15 @@ export const useChromeActions = (onShowMessage?: (title: string, message: string
       console.error('Error clicking view all checkbox:', err);
       return 'error';
     }
-  }, [getCurrentTab, isValidPage, showNotification]);
+  }, [getCurrentTab, isValidPage, showNotification, VALID_PATHS.evaluations]);
 
   return {
     injectContentScript,
     findText,
     findOccurrencesWithDates,
     clickViewAllCheckbox,
+    isValidPage,
+    isEvaluationsPage,
+    isOrdersPage,
   };
 };
